@@ -480,12 +480,8 @@ export async function mergeArchiveTasksWithTaskFiles(
     parsedTasks.forEach((task) => {
       const existingIndex = findTaskIndex(mergedTasks, version.id, task);
       if (existingIndex >= 0) {
-        mergedTasks[existingIndex] = {
-          ...mergedTasks[existingIndex],
-          ...task,
-          id: mergedTasks[existingIndex].id,
-          createdAt: mergedTasks[existingIndex].createdAt,
-        };
+        // Archive data is the source of truth for existing tasks.
+        // Task files can still introduce brand-new tasks that do not exist in the archive.
         return;
       }
 

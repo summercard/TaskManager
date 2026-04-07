@@ -464,7 +464,7 @@ export async function syncTaskManagerWorkspaceFiles(
       'ImplementationDocument.md',
       buildVersionImplementationDocument(project, version, tasks)
     );
-    await writeTextFileIfMissing(
+    await writeTextFile(
       versionDirectory,
       TASK_MANAGER_TASK_FILE_NAME,
       buildVersionTaskFile(project, version, tasks)

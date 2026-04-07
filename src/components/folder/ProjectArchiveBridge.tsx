@@ -30,6 +30,79 @@ function getArchiveSignature(archive: ProjectArchiveData): string {
   });
 }
 
+function toTimestamp(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getArchiveLatestTimestamp(archive: ProjectArchiveData): number {
+  let latest = Math.max(
+    toTimestamp(archive.savedAt),
+    toTimestamp(archive.project.updatedAt)
+  );
+
+  for (const task of archive.tasks ?? []) {
+    latest = Math.max(latest, toTimestamp(task.updatedAt));
+  }
+
+  for (const comment of archive.comments ?? []) {
+    latest = Math.max(latest, toTimestamp(comment.updatedAt));
+  }
+
+  return latest;
+}
+
+function getLocalLatestTimestamp(
+  projectId: string,
+  projects: Array<{ id: string; updatedAt: string }>,
+  tasks: Array<{ id: string; projectId: string; updatedAt: string }>,
+  comments: Array<{ taskId: string; updatedAt: string }>
+): number {
+  let latest = 0;
+  const project = projects.find((item) => item.id === projectId);
+  const projectTasks = tasks.filter((item) => item.projectId === projectId);
+  const projectTaskIds = new Set(projectTasks.map((item) => item.id));
+
+  if (project) {
+    latest = Math.max(latest, toTimestamp(project.updatedAt));
+  }
+
+  for (const task of projectTasks) {
+    latest = Math.max(latest, toTimestamp(task.updatedAt));
+  }
+
+  for (const comment of comments) {
+    if (projectTaskIds.has(comment.taskId)) {
+      latest = Math.max(latest, toTimestamp(comment.updatedAt));
+    }
+  }
+
+  return latest;
+}
+
+function shouldPullArchive(
+  projectId: string,
+  archive: ProjectArchiveData,
+  projects: Array<{ id: string; updatedAt: string }>,
+  tasks: Array<{ id: string; projectId: string; updatedAt: string }>,
+  comments: Array<{ taskId: string; updatedAt: string }>
+): boolean {
+  const hasLocalProject = projects.some((item) => item.id === projectId);
+  const hasLocalTasks = tasks.some((item) => item.projectId === projectId);
+  const localLatest = getLocalLatestTimestamp(projectId, projects, tasks, comments);
+  const archiveLatest = getArchiveLatestTimestamp(archive);
+
+  if (!hasLocalProject && !hasLocalTasks && localLatest === 0) {
+    return true;
+  }
+
+  return archiveLatest > localLatest;
+}
+
 export function ProjectArchiveBridge() {
   const { configs, setProjectFolder, updateSyncStatus, updateLastSyncedAt } = useFolderStore();
   const { projects, hydrateProject } = useProjectStore();
@@ -110,7 +183,14 @@ export function ProjectArchiveBridge() {
             continue;
           }
 
-          lastHydratedSignatureRef.current[projectId] = getArchiveSignature(archive);
+          const archiveSignature = getArchiveSignature(archive);
+          const canPullArchive = shouldPullArchive(projectId, archive, projects, tasks, comments);
+          lastHydratedSignatureRef.current[projectId] = archiveSignature;
+          if (!canPullArchive) {
+            setHydrationReady((current) => ({ ...current, [projectId]: true }));
+            continue;
+          }
+
           hydrateProject(archive.project);
           replaceProjectSnapshot(projectId, archive.tasks, archive.comments);
           updateSyncStatus(projectId, 'synced');
@@ -133,10 +213,13 @@ export function ProjectArchiveBridge() {
     };
   }, [
     configs,
+    comments,
     hydrateProject,
     hydrationReady,
+    projects,
     registryProjectIds,
     replaceProjectSnapshot,
+    tasks,
     updateLastSyncedAt,
     updateSyncStatus,
   ]);
@@ -168,7 +251,12 @@ export function ProjectArchiveBridge() {
             continue;
           }
 
+          const canPullArchive = shouldPullArchive(projectId, archive, projects, tasks, comments);
           lastHydratedSignatureRef.current[projectId] = archiveSignature;
+          if (!canPullArchive) {
+            continue;
+          }
+
           hydrateProject(archive.project);
           replaceProjectSnapshot(projectId, archive.tasks, archive.comments);
           updateSyncStatus(projectId, 'synced');
@@ -209,10 +297,13 @@ export function ProjectArchiveBridge() {
     };
   }, [
     configs,
+    comments,
     hydrateProject,
     hydrationReady,
+    projects,
     registryProjectIds,
     replaceProjectSnapshot,
+    tasks,
     updateLastSyncedAt,
     updateSyncStatus,
   ]);
