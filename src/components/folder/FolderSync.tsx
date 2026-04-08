@@ -236,6 +236,27 @@ export function FolderSync({ project, onSyncComplete }: FolderSyncProps) {
     }
   }, [getValidDirectoryHandle, project.id, syncFromFolder, syncToFolder, updateSyncStatus]);
 
+  const handleRefreshFromFolder = useCallback(async () => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const handle = await getValidDirectoryHandle(false);
+      if (!handle) {
+        setError('无法访问项目文件夹，请重新关联。');
+        return;
+      }
+
+      await syncFromFolder(handle);
+    } catch (err) {
+      const message = (err as Error).message;
+      setError(message);
+      updateSyncStatus(project.id, 'error', message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [getValidDirectoryHandle, project.id, syncFromFolder, updateSyncStatus]);
+
   const handleRemoveRemoteState = useCallback(async () => {
     const handle = await getValidDirectoryHandle(true);
     if (!handle) {
@@ -399,6 +420,9 @@ export function FolderSync({ project, onSyncComplete }: FolderSyncProps) {
           <div className="flex items-center gap-2">
             {folderConfig ? (
               <>
+                <Button variant="secondary" size="xs" onClick={(event) => { event.stopPropagation(); void handleRefreshFromFolder(); }} disabled={isLoading}>
+                  刷新
+                </Button>
                 <Button variant="secondary" size="xs" onClick={(event) => { event.stopPropagation(); setShowSyncModal(true); }}>
                   存档
                 </Button>
