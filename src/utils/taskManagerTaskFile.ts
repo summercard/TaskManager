@@ -202,12 +202,12 @@ export function buildVersionTaskFile(project: Project, version: ProjectVersion, 
   const defaultPlacement = getDefaultPlacement(version);
   const versionTasks = sortTasksByOrder(getVersionTasks(project, version, tasks));
   const taskBlocks = versionTasks.length === 0
-    ? `${TASK_TITLE_PREFIX}示例：补充 ${version.label} 的一个开发任务\n- 编号：01\n- 对应阶段：${buildTaskTargetSummary(defaultPlacement.documentTitle, defaultPlacement.stageTitle) ?? ''}\n- 状态：todo\n- 优先级：medium\n- 进度：0\n- 文档：${defaultPlacement.documentTitle ?? ''}\n- 阶段：${defaultPlacement.stageTitle ?? ''}\n- 标签：\n- 目标：先补一条任务，确认任务文件和网页端已经打通\n- 描述：\n  这里写任务说明，保存后在网页端刷新或执行“从文件夹恢复当前项目”即可看到。`
+    ? `${TASK_TITLE_PREFIX}示例：补充 ${version.label} 的一个开发任务\n- 编号：01\n- 对应阶段：${buildTaskTargetSummary(defaultPlacement.documentTitle, defaultPlacement.stageTitle) ?? ''}\n- 状态：todo\n- 优先级：medium\n- 进度：0\n- 文档：${defaultPlacement.documentTitle ?? ''}\n- 阶段：${defaultPlacement.stageTitle ?? ''}\n- 标签：\n- 目标：先补一条任务，确认任务文件和桌面端已经打通\n- 描述：\n  这里写任务说明，保存后回到桌面端点击“刷新”（或执行一次“从文件夹恢复当前项目”）即可看到。`
     : versionTasks.map((task) => formatTaskBlock(version, task, defaultPlacement)).join('\n\n');
 
   return `# ${project.name} ${version.label} 任务文件
 
-> 这个文件里的每个 \`${TASK_TITLE_PREFIX}...\` 块，都会被网页端解析成任务。
+> 这个文件里的每个 \`${TASK_TITLE_PREFIX}...\` 块，都会被 TaskManager 解析成任务。
 > 新增任务时，复制下面的模板块并修改标题；如果你想让任务改名后仍然保持同一条记录，可以补一个唯一的“任务键”。
 > 文档 / 阶段留空时，会自动归到默认归属。
 
@@ -218,7 +218,7 @@ export function buildVersionTaskFile(project: Project, version: ProjectVersion, 
 3. 描述支持多行，写在 \`- 描述：\` 的下一行并保持两个空格缩进。
 4. 每个任务都必须明确对应到某个文档阶段；建议同时填写“对应阶段”以及下面的“文档 / 阶段”字段。
 5. 编号越小代表越先执行；如果不填编号，系统会按文件顺序自动补号。
-6. 保存文件后，重新打开网页或执行一次“从文件夹恢复当前项目”，就会把新增任务读回网页端。
+6. 保存文件后，回到桌面端点击一次“刷新”（或执行一次“从文件夹恢复当前项目”），就会把新增任务读回 TaskManager。
 
 ${DEFAULT_SCOPE_HEADING}
 - 文档：${defaultPlacement.documentTitle ?? ''}
@@ -481,13 +481,18 @@ export async function mergeArchiveTasksWithTaskFiles(
       const existingIndex = findTaskIndex(mergedTasks, version.id, task);
       if (existingIndex >= 0) {
         // ✅ Tasks.md is the source of truth for task status and progress.
-        // Update existing task with status/progress from Tasks.md.
-        mergedTasks[existingIndex] = {
-          ...mergedTasks[existingIndex],
-          status: task.status,
-          progress: task.progress,
-          updatedAt: task.updatedAt,
-        };
+        // Only touch the task when status/progress actually changed; otherwise we would
+        // keep bumping updatedAt on every refresh.
+        const previous = mergedTasks[existingIndex];
+        const previousProgress = previous.progress ?? 0;
+        if (previous.status !== task.status || previousProgress !== task.progress) {
+          mergedTasks[existingIndex] = {
+            ...previous,
+            status: task.status,
+            progress: task.progress,
+            updatedAt: task.updatedAt,
+          };
+        }
         return;
       }
 

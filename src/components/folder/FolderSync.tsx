@@ -27,12 +27,24 @@ import {
   readProjectArchive,
   syncProjectArchive,
 } from '@/utils/projectArchive';
+import { mergeArchiveTasksWithTaskFiles, TASK_MANAGER_TASK_FILE_NAME } from '@/utils/taskManagerTaskFile';
 import { formatRelativeTime } from '@/utils';
 import { getCurrentProjectVersion } from '@/utils/projectVersion';
+import { isDesktopApp } from '@/utils/desktop';
+import { getVersionFolderName } from '@/utils/taskManagerDocs';
 
 interface FolderSyncProps {
   project: Project;
   onSyncComplete?: () => void;
+}
+
+function hashText(value: string): string {
+  // Simple stable hash for change detection (not crypto).
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(16);
 }
 
 export function FolderSync({ project, onSyncComplete }: FolderSyncProps) {
@@ -44,6 +56,8 @@ export function FolderSync({ project, onSyncComplete }: FolderSyncProps) {
 
   const directoryHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const lastAutoSyncSignatureRef = useRef<string>('');
+  const lastRemoteTaskFileSignatureRef = useRef<Record<string, string>>({});
+  const remoteRefreshInFlightRef = useRef(false);
 
   const {
     getFolderConfig,
@@ -333,6 +347,109 @@ export function FolderSync({ project, onSyncComplete }: FolderSyncProps) {
       isCancelled = true;
     };
   }, [autoSyncSignature, folderConfig, getValidDirectoryHandle, syncToFolder, tasks.length]);
+
+  useEffect(() => {
+    if (!folderConfig) {
+      return;
+    }
+
+    if (!isDesktopApp()) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const readVersionTaskFileText = async (handle: FileSystemDirectoryHandle, versionId: string) => {
+      const version = project.versions?.find((item) => item.id === versionId);
+      if (!version) {
+        return null;
+      }
+
+      try {
+        const taskManagerDirectory = await handle.getDirectoryHandle('.task-manager');
+        const versionDirectory = await taskManagerDirectory.getDirectoryHandle(getVersionFolderName(version));
+        const fileHandle = await versionDirectory.getFileHandle(TASK_MANAGER_TASK_FILE_NAME);
+        const file = await fileHandle.getFile();
+        return file.text();
+      } catch (err) {
+        if ((err as Error).name === 'NotFoundError') {
+          return null;
+        }
+        throw err;
+      }
+    };
+
+    const pollRemoteTaskFiles = async () => {
+      if (remoteRefreshInFlightRef.current) {
+        return;
+      }
+
+      const handle = directoryHandleRef.current;
+      if (!handle) {
+        return;
+      }
+
+      remoteRefreshInFlightRef.current = true;
+
+      try {
+        const versions = project.versions ?? [];
+        if (versions.length === 0) {
+          return;
+        }
+
+        let shouldRefresh = false;
+
+        for (const version of versions) {
+          const content = await readVersionTaskFileText(handle, version.id);
+          const signature = content === null ? '__missing__' : `${content.length}:${hashText(content)}`;
+          const previous = lastRemoteTaskFileSignatureRef.current[version.id];
+          lastRemoteTaskFileSignatureRef.current[version.id] = signature;
+
+          if (previous && previous !== signature) {
+            shouldRefresh = true;
+          }
+        }
+
+        if (!shouldRefresh || isCancelled) {
+          return;
+        }
+
+        const currentTasks = getTasksByProject(project.id);
+        const mergedTasks = await mergeArchiveTasksWithTaskFiles(handle, project, currentTasks);
+
+        if (!isCancelled) {
+          replaceProjectSnapshot(project.id, mergedTasks, projectComments);
+        }
+      } catch (err) {
+        // Background refresh should never interrupt the user flow.
+        console.warn('[task-manager] Failed to poll remote task files:', err);
+      } finally {
+        remoteRefreshInFlightRef.current = false;
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      if (!isCancelled) {
+        void pollRemoteTaskFiles();
+      }
+    }, 2000);
+
+    // Warm up baseline signatures.
+    void pollRemoteTaskFiles();
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    folderConfig,
+    getTasksByProject,
+    project,
+    project.id,
+    project.versions,
+    projectComments,
+    replaceProjectSnapshot,
+  ]);
 
   const getSyncStatusDisplay = (status: SyncStatus | undefined) => {
     switch (status) {

@@ -51,13 +51,25 @@ npm install
 
 ## 开发
 
-### 启动开发服务器
+### 桌面端（推荐）
+
+```bash
+# 桌面端开发（会启动 Vite 开发服务器供 Electron 加载）
+npm run desktop:dev
+```
+
+```bash
+# 构建并启动桌面端
+npm run desktop:start
+```
+
+### 浏览器预览（可选）
 
 ```bash
 npm run dev
 ```
 
-访问 http://localhost:5173 查看应用。
+`npm run dev` 只用于在浏览器中预览界面调试；正式使用请以桌面端为准。
 
 ### 类型检查
 
