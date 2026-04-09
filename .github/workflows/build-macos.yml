@@ -1,0 +1,62 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+
+    steps:
+      # Checkout 代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 安装 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # 安装依赖
+      - name: Install dependencies
+        run: npm ci
+
+      # 构建 React 应用
+      - name: Build React app
+        run: npm run build
+
+      # 构建 macOS 安装包
+      - name: Build macOS installer
+        run: npm run dist -- --mac
+
+      # 上传构建产物
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: TaskManager-macOS
+          path: dist/*.dmg
+          retention-days: 30
+
+      # 创建 Release（仅在 tag 时）
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*.dmg
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

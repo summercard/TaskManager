@@ -1,0 +1,87 @@
+name: Build All Platforms
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            platform: Windows
+            artifact-name: TaskManager-Windows
+            file-pattern: dist/*.exe
+          - os: macos-latest
+            platform: macOS
+            artifact-name: TaskManager-macOS
+            file-pattern: dist/*.dmg
+
+    name: Build for ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      # Checkout 代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 安装 Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      # 安装依赖
+      - name: Install dependencies
+        run: npm ci
+
+      # 构建 React 应用
+      - name: Build React app
+        run: npm run build
+
+      # 构建安装包
+      - name: Build installer
+        run: npm run dist -- --${{ matrix.platform == 'Windows' && 'win' || 'mac' }}
+
+      # 上传构建产物
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.file-pattern }}
+          retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      # 下载所有构建产物
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      # 创建 Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            TaskManager-Windows/*
+            TaskManager-macOS/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
